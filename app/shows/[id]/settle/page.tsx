@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
-  FileWarning,
   ArrowRight,
   Check,
   AlertTriangle,
@@ -11,6 +10,9 @@ import {
   XCircle,
   Wallet,
   TrendingUp,
+  TrendingDown,
+  ChevronRight,
+  Info,
 } from "lucide-react";
 import { getShowById } from "@/lib/queries";
 import {
@@ -23,12 +25,13 @@ import {
 } from "@/components/ui/card";
 import { StatusBadge, DealTypeBadge, PlainBadge } from "@/components/ui/badge";
 import { calculateSettlement } from "@/lib/dealMath";
-import {
-  formatMoney,
-  formatShowDateFull,
-} from "@/lib/format";
+import { formatMoney, formatShowDateFull } from "@/lib/format";
 import type { Settlement, Recoup } from "@/db/schema";
 import { Logomark } from "@/components/brand/logo";
+import type {
+  AuditStep as CalcAuditStep,
+  BonusEval as CalcBonusEval,
+} from "@/lib/dealMath";
 
 const RECOUP_LABELS: Record<Recoup["category"], string> = {
   marketing: "Marketing",
@@ -68,24 +71,38 @@ export default async function SettlePage({
     expenses,
     venueCapacity: data.venue?.capacity ?? undefined,
   });
-  const grossSoFar = ticketSales.reduce((sum, t) => sum + t.gross, 0);
-  const totalFees = ticketSales.reduce((sum, t) => sum + t.fees, 0);
-  const totalExpenses = expenses
-    .filter((e) => !e.absorbedByVenue)
-    .reduce((sum, e) => sum + e.amount, 0);
 
   const disputedRecoups = recoups.filter((r) => r.status === "disputed");
-  const isDisputed = settlement?.status === "disputed" || settlement?.status === "revised" || !!settlement?.disputedAt;
-  const disputedRecoupValue = disputedRecoups.reduce((s, r) => s + r.amount, 0);
+  const isDisputed =
+    settlement?.status === "disputed" ||
+    settlement?.status === "revised" ||
+    !!settlement?.disputedAt;
+  const disputedRecoupValue = disputedRecoups.reduce(
+    (s, r) => s + r.amount,
+    0
+  );
 
   return (
-    <div className={`px-12 py-10 max-w-7xl ${isDisputed ? "bg-gradient-to-b from-rose-50/30 via-canvas to-canvas" : ""}`}>
+    <div
+      className={`px-12 py-10 max-w-7xl ${
+        isDisputed
+          ? "bg-gradient-to-b from-rose-50/30 via-canvas to-canvas"
+          : ""
+      }`}
+    >
       <BackLink showId={show.id} />
 
-      <div className="mb-20">
+      <div className="mb-16">
         <div className="flex items-center gap-1.5 mb-4">
           <StatusBadge status={show.status} />
           <DealTypeBadge type={deal.dealType} />
+          {calc.supported &&
+            (calc as { flavor?: string }).flavor &&
+            (calc as { flavor?: string }).flavor !== "standard" && (
+              <PlainBadge variant="sky">
+                {(calc as { flavor?: string }).flavor}
+              </PlainBadge>
+            )}
           {settlement?.status === "disputed" && (
             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10.5px] font-medium ring-1 ring-inset bg-rose-50 text-rose-800 ring-rose-200/80">
               <span className="relative flex h-1.5 w-1.5">
@@ -95,11 +112,11 @@ export default async function SettlePage({
               Disputed
             </span>
           )}
-          {settlement?.status === "voided" && (
-            <PlainBadge variant="default">Voided</PlainBadge>
-          )}
         </div>
-        <h1 className="font-display text-[48px] font-medium text-ink-900 leading-[1.05]" style={{ letterSpacing: "-0.02em", fontOpticalSizing: "auto" }}>
+        <h1
+          className="font-display text-[48px] font-medium text-ink-900 leading-[1.05]"
+          style={{ letterSpacing: "-0.02em", fontOpticalSizing: "auto" }}
+        >
           Settlement · {artist?.name}
         </h1>
         <div className="text-[14px] text-ink-400 mt-3">
@@ -107,39 +124,60 @@ export default async function SettlePage({
         </div>
       </div>
 
-      {/* Disputed callout */}
       {isDisputed && disputedRecoupValue > 0 && (
         <div className="mb-8 rounded-lg border border-rose-200/60 bg-rose-50/40 p-5 flex gap-3">
           <AlertTriangle className="h-4 w-4 text-rose-700 mt-0.5 shrink-0" />
           <div>
             <div className="text-[13px] font-semibold text-rose-800">
-              {disputedRecoups.length} recoup{disputedRecoups.length === 1 ? "" : "s"} in dispute · {formatMoney(disputedRecoupValue)} contested
+              {disputedRecoups.length} recoup
+              {disputedRecoups.length === 1 ? "" : "s"} in dispute ·{" "}
+              {formatMoney(disputedRecoupValue)} contested
             </div>
             <p className="text-[12.5px] text-ink-600 mt-1 leading-relaxed">
-              The artist team has flagged recoup line items. This settlement cannot be finalized until the dispute is resolved.
+              The artist team has flagged recoup line items. This settlement
+              cannot be finalized until the dispute is resolved.
             </p>
           </div>
         </div>
       )}
 
       {settlement && (
-        <LifecycleBar settlement={settlement} disputedRecoups={disputedRecoups.length} />
+        <LifecycleBar
+          settlement={settlement}
+          disputedRecoups={disputedRecoups.length}
+        />
       )}
 
       <div className="space-y-6 mt-6">
-        {!calc.supported ? (
+        {calc.supported ? (
+          <SupportedSettlement
+            calc={
+              calc as Extract<
+                ReturnType<typeof calculateSettlement>,
+                { supported: true }
+              >
+            }
+            existingSettlement={settlement}
+            deal={deal}
+          />
+        ) : (
           <UnsupportedDeal
-            dealType={calc.dealType}
+            calc={
+              calc as Extract<
+                ReturnType<typeof calculateSettlement>,
+                { supported: false }
+              >
+            }
             deal={deal}
             existingSettlement={settlement}
-            grossSoFar={grossSoFar}
-            totalFees={totalFees}
-            totalExpenses={totalExpenses}
+            grossSoFar={ticketSales.reduce((s, t) => s + t.gross, 0)}
+            totalFees={ticketSales.reduce((s, t) => s + t.fees, 0)}
+            totalExpenses={expenses
+              .filter((e) => !e.absorbedByVenue)
+              .reduce((s, e) => s + e.amount, 0)}
             ticketCount={ticketSales.reduce((s, t) => s + (t.qty ?? 0), 0)}
             expenseRowCount={expenses.length}
           />
-        ) : (
-          <SupportedSettlement calc={calc} existingSettlement={settlement} />
         )}
 
         {recoups.length > 0 && <RecoupsSection recoups={recoups} />}
@@ -153,20 +191,22 @@ export default async function SettlePage({
         <div className="flex gap-4 items-start max-w-3xl">
           <Logomark size={40} className="shrink-0" />
           <div>
-            <h2 className="font-display text-[20px] font-medium text-ink-900 mb-2" style={{ letterSpacing: "-0.02em" }}>
-              You&apos;re looking at the seam this case study is about.
+            <h2
+              className="font-display text-[20px] font-medium text-ink-900 mb-2"
+              style={{ letterSpacing: "-0.02em" }}
+            >
+              Every number, every decision — shown.
             </h2>
             <p className="text-[13px] text-ink-500 leading-relaxed">
-              Greenroom&apos;s in-app settlement tool was built early in the
-              company&apos;s history, when most deals were flat guarantees.
-              About 18% of customers actively use it; the other 82% — including
-              most of the larger venues — default to spreadsheets. The CEO has
-              flagged this as the company&apos;s biggest craft gap.{" "}
+              The audit trail above is the complete settlement worksheet.
+              Guarantee vs percentage comparison, expense caps, bonus
+              evaluations — every input is visible so the artist&apos;s team
+              can follow the math and sign with confidence.{" "}
               <Link
                 href="/context"
                 className="text-brand-700 font-medium hover:text-brand-800 hover:underline inline-flex items-center gap-0.5"
               >
-                Where to start <ArrowRight className="h-3 w-3" />
+                About this prototype <ArrowRight className="h-3 w-3" />
               </Link>
             </p>
           </div>
@@ -187,176 +227,387 @@ function BackLink({ showId }: { showId: string }) {
   );
 }
 
-type Stage = {
-  key: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  timestamp?: Date | null;
-};
-
-function LifecycleBar({
-  settlement,
-  disputedRecoups,
+function SupportedSettlement({
+  calc,
+  existingSettlement,
+  deal,
 }: {
-  settlement: Settlement;
-  disputedRecoups: number;
+  calc: Extract<ReturnType<typeof calculateSettlement>, { supported: true }>;
+  existingSettlement: NonNullable<
+    Awaited<ReturnType<typeof getShowById>>
+  >["settlement"];
+  deal: NonNullable<Awaited<ReturnType<typeof getShowById>>>["deal"];
 }) {
-  if (settlement.status === "voided") {
-    return (
-      <div className="rounded-lg border border-ink-200/80 bg-white px-5 py-4 flex items-center gap-3">
-        <XCircle className="h-4 w-4 text-ink-400" />
-        <div>
-          <div className="text-[13px] font-medium text-ink-900">
-            Settlement voided
+  const isVs = calc.dealType === "vs";
+  const hasGap =
+    existingSettlement?.totalToArtist != null &&
+    Math.abs(existingSettlement.totalToArtist - calc.totalToArtist) > 0.5;
+
+  return (
+    <>
+      <div className="text-center py-10 mb-2">
+        <div className="eyebrow text-[10px] text-ink-400 mb-3">
+          Total to artist
+        </div>
+        <div
+          className="text-[72px] font-mono tabular font-bold text-ink-900 leading-none"
+          style={{ letterSpacing: "-0.03em" }}
+        >
+          {formatMoney(calc.totalToArtist)}
+        </div>
+        {existingSettlement && (
+          <div className="mt-3">
+            {existingSettlement.status === "paid" ? (
+              <PlainBadge variant="brand">Paid</PlainBadge>
+            ) : existingSettlement.status === "signed" ||
+              existingSettlement.status === "finalized" ? (
+              <PlainBadge variant="brand">Signed</PlainBadge>
+            ) : existingSettlement.status === "disputed" ? (
+              <PlainBadge variant="rose">Disputed</PlainBadge>
+            ) : null}
           </div>
-          <div className="text-[11.5px] text-ink-400 mt-0.5">
-            The show was cancelled or the settlement was scrapped.
+        )}
+      </div>
+
+      {hasGap && existingSettlement?.totalToArtist != null && (
+        <div className="rounded-lg border border-amber-200/60 bg-amber-50/40 p-5 flex gap-3">
+          <AlertTriangle className="h-4 w-4 text-amber-700 mt-0.5 shrink-0" />
+          <div>
+            <div className="text-[13px] font-semibold text-amber-900 mb-1">
+              {formatMoney(
+                Math.abs(
+                  existingSettlement.totalToArtist - calc.totalToArtist
+                )
+              )}{" "}
+              gap between calculated and recorded
+            </div>
+            <p className="text-[12.5px] text-ink-700 leading-relaxed">
+              This engine calculates{" "}
+              <span className="font-mono font-semibold">
+                {formatMoney(calc.totalToArtist)}
+              </span>{" "}
+              from the structured deal terms. Greenroom recorded{" "}
+              <span className="font-mono font-semibold">
+                {formatMoney(existingSettlement.totalToArtist)}
+              </span>{" "}
+              — settled off-platform via spreadsheet. The gap typically reflects
+              a manual concession, a disputed recoup, or a renegotiation that
+              happened outside the system and was never reconciled back.
+            </p>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  const stages: Stage[] = [
-    {
-      key: "draft",
-      label: "Drafted",
-      icon: Pencil,
-      timestamp: settlement.draftedAt,
-    },
-    {
-      key: "submitted",
-      label: "Submitted",
-      icon: Mail,
-      timestamp: settlement.submittedAt,
-    },
-    {
-      key: "review",
-      label: "Reviewed",
-      icon: TrendingUp,
-      timestamp: settlement.reviewStartedAt,
-    },
-    {
-      key: "signed",
-      label: settlement.disputedAt ? "Finalized" : "Signed",
-      icon: Check,
-      timestamp: settlement.finalizedAt ?? settlement.signedAt,
-    },
-    {
-      key: "paid",
-      label: "Paid",
-      icon: Wallet,
-      timestamp: settlement.paidAt,
-    },
-  ];
+      {isVs && calc.vsGuarantee != null && (
+        <VsComparisonPanel calc={calc} />
+      )}
 
-  const currentIndex = (() => {
-    switch (settlement.status) {
-      case "draft":
-        return 0;
-      case "submitted":
-        return 1;
-      case "in_review":
-        return 2;
-      case "disputed":
-      case "signed":
-      case "revised":
-      case "finalized":
-        return 3;
-      case "paid":
-        return 4;
-      default:
-        return 0;
-    }
-  })();
+      <InputsCard calc={calc} deal={deal} />
+      <AuditTrailCard calc={calc} />
 
-  const isDisputed =
-    settlement.status === "disputed" ||
-    settlement.status === "revised" ||
-    !!settlement.disputedAt;
+      {calc.bonusesNotTriggered.length > 0 && (
+        <BonusesNotTriggeredCard bonuses={calc.bonusesNotTriggered} />
+      )}
+    </>
+  );
+}
+
+function VsComparisonPanel({
+  calc,
+}: {
+  calc: Extract<ReturnType<typeof calculateSettlement>, { supported: true }>;
+}) {
+  if (
+    calc.vsGuarantee == null ||
+    calc.vsPercentagePayout == null ||
+    calc.vsWinner == null
+  )
+    return null;
+
+  const guaranteeWins = calc.vsWinner === "guarantee";
+  const pctWins = calc.vsWinner === "percentage";
 
   return (
     <Card>
-      <CardContent className="py-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="eyebrow text-[10px] text-ink-400">
-            Settlement lifecycle
-          </div>
-          {isDisputed && (
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-rose-700">
-              <AlertTriangle className="h-3 w-3" />
-              {settlement.status === "disputed"
-                ? "In dispute"
-                : settlement.status === "revised"
-                  ? "Revision sent"
-                  : "Resolved after dispute"}
-              {disputedRecoups > 0 && (
-                <span className="text-rose-600">
-                  · {disputedRecoups} disputed recoup
-                  {disputedRecoups === 1 ? "" : "s"}
-                </span>
-              )}
+      <CardHeader>
+        <div>
+          <CardTitle>Guarantee vs percentage</CardTitle>
+          <CardDescription>
+            Artist receives whichever is greater.
+          </CardDescription>
+        </div>
+        <PlainBadge variant={pctWins ? "brand" : "amber"}>
+          {pctWins ? "Percentage wins" : "Guarantee wins"}
+        </PlainBadge>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4">
+          <div
+            className={`rounded-lg p-5 ${
+              guaranteeWins
+                ? "ring-2 ring-brand-500 bg-brand-50/30"
+                : "ring-1 ring-ink-200/60 bg-white"
+            }`}
+          >
+            <div className="eyebrow text-[10px] text-ink-500 mb-2">
+              Guarantee floor
             </div>
+            <div className="text-[28px] font-mono tabular font-semibold text-ink-900 leading-none">
+              {formatMoney(calc.vsGuarantee)}
+            </div>
+            {guaranteeWins && (
+              <div className="flex items-center gap-1 mt-2 text-[11px] text-brand-700 font-medium">
+                <Check className="h-3 w-3" />
+                Applied
+              </div>
+            )}
+          </div>
+          <div
+            className={`rounded-lg p-5 ${
+              pctWins
+                ? "ring-2 ring-brand-500 bg-brand-50/30"
+                : "ring-1 ring-ink-200/60 bg-white"
+            }`}
+          >
+            <div className="eyebrow text-[10px] text-ink-500 mb-2">
+              Percentage payout
+            </div>
+            <div className="text-[28px] font-mono tabular font-semibold text-ink-900 leading-none">
+              {formatMoney(calc.vsPercentagePayout)}
+            </div>
+            {pctWins && (
+              <div className="flex items-center gap-1 mt-2 text-[11px] text-brand-700 font-medium">
+                <Check className="h-3 w-3" />
+                Applied
+              </div>
+            )}
+          </div>
+        </div>
+        {guaranteeWins && (
+          <div className="mt-4 rounded-lg bg-amber-50/50 ring-1 ring-amber-200/60 px-4 py-3 text-[12.5px] text-ink-700 leading-relaxed">
+            Ticket performance ({formatMoney(calc.vsPercentagePayout)}) did not
+            exceed the guarantee floor. The artist receives the guaranteed
+            minimum.
+          </div>
+        )}
+        {pctWins && (
+          <div className="mt-4 rounded-lg bg-brand-50/50 ring-1 ring-brand-200/60 px-4 py-3 text-[12.5px] text-ink-700 leading-relaxed">
+            Ticket performance exceeded the guarantee — the artist earns{" "}
+            {formatMoney(calc.vsPercentagePayout - calc.vsGuarantee)} above the
+            floor.
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function InputsCard({
+  calc,
+  deal,
+}: {
+  calc: Extract<ReturnType<typeof calculateSettlement>, { supported: true }>;
+  deal: NonNullable<Awaited<ReturnType<typeof getShowById>>>["deal"];
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>Inputs used in this calculation</CardTitle>
+          <CardDescription>
+            Every number the settlement engine read.
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <Field
+            label="Gross box office"
+            mono
+            value={formatMoney(calc.grossBoxOffice)}
+          />
+          <Field
+            label="Ticketing fees"
+            mono
+            value={formatMoney(calc.totalFees)}
+          />
+          <Field
+            label="Net box office"
+            mono
+            value={formatMoney(calc.netBoxOffice)}
+          />
+          <Field
+            label="Expenses (passed through)"
+            mono
+            value={formatMoney(calc.totalExpenses)}
+          />
+          {calc.expenseCap != null && (
+            <Field
+              label="Expense cap"
+              mono
+              value={formatMoney(calc.expenseCap)}
+            />
+          )}
+          {calc.cappedExpenses !== calc.totalExpenses && (
+            <Field
+              label="Expenses after cap"
+              mono
+              value={formatMoney(calc.cappedExpenses)}
+            />
           )}
         </div>
 
-        <div className="grid grid-cols-5 gap-1 relative">
-          <div className="absolute top-3.5 left-[10%] right-[10%] h-px bg-ink-200/60" />
+        {deal?.dealNotesFreetext && (
+          <div className="mt-5 pt-5 border-t border-ink-100/80">
+            <div className="eyebrow text-[10px] text-ink-500 mb-2">
+              Deal notes (what Mariana trusts)
+            </div>
+            <div
+              className="text-[12.5px] text-ink-800 bg-canvas-soft rounded-lg p-4 ring-1 ring-ink-200/60 leading-relaxed"
+              style={{ fontStyle: "italic" }}
+            >
+              {deal.dealNotesFreetext}
+            </div>
+            <div className="mt-2 text-[11px] text-ink-400 leading-snug">
+              Note: the calculation uses structured fields. If the prose
+              differs, the prose is the authoritative deal.
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
-          {stages.map((stage, i) => {
-            const isComplete = i < currentIndex;
-            const isCurrent = i === currentIndex;
-            const isFuture = i > currentIndex;
-            const Icon = stage.icon;
-
-            const stageDot = (() => {
-              if (isComplete) {
-                return "bg-brand-700 ring-brand-700 text-white";
-              }
-              if (isCurrent) {
-                return isDisputed
-                  ? "bg-rose-50 ring-rose-500 text-rose-700"
-                  : "bg-brand-50 ring-brand-700 text-brand-700";
-              }
-              return "bg-white ring-ink-200/80 text-ink-300";
-            })();
-
-            return (
-              <div
-                key={stage.key}
-                className="flex flex-col items-center text-center"
-              >
-                <div
-                  className={`relative z-10 w-7 h-7 rounded-full ring-2 flex items-center justify-center ${stageDot}`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                </div>
-                <div
-                  className={`mt-2.5 text-[11px] font-medium leading-tight ${
-                    isFuture ? "text-ink-300" : "text-ink-900"
-                  }`}
-                >
-                  {stage.label}
-                </div>
-                <div className="text-[10px] text-ink-400 mt-0.5 font-mono tabular leading-tight min-h-[12px]">
-                  {stage.timestamp
-                    ? new Date(stage.timestamp).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })
-                    : ""}
-                </div>
-              </div>
-            );
-          })}
+function AuditTrailCard({
+  calc,
+}: {
+  calc: Extract<ReturnType<typeof calculateSettlement>, { supported: true }>;
+}) {
+  return (
+    <Card accent="brand">
+      <CardHeader>
+        <div>
+          <CardTitle>Settlement worksheet — full audit trail</CardTitle>
+          <CardDescription className="font-mono text-[11px]">
+            {calc.finalFormula}
+          </CardDescription>
         </div>
+      </CardHeader>
+      <CardContent className="divide-y divide-ink-100/80 px-0">
+        {calc.steps.map((step, i) => (
+          <AuditRow key={i} step={step} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AuditRow({ step }: { step: CalcAuditStep }) {
+  const isTotal = step.label === "Total to artist";
+  const isWinner =
+    step.label.startsWith("▲") || step.label.startsWith("▼");
+  const label = step.label.replace(/^[▲▼] /, "");
+
+  return (
+    <div
+      className={`flex items-start justify-between gap-4 px-5 py-3 ${
+        isTotal
+          ? "bg-brand-50/20"
+          : isWinner
+          ? step.label.startsWith("▲")
+            ? "bg-brand-50/10"
+            : "bg-amber-50/20"
+          : ""
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        <div
+          className={`text-[13px] leading-tight flex items-center gap-1.5 ${
+            isTotal
+              ? "font-semibold text-ink-900"
+              : step.isSubtotal
+              ? "font-medium text-ink-800"
+              : step.isDeduction
+              ? "text-ink-500"
+              : "text-ink-700"
+          }`}
+        >
+          {step.isDeduction && (
+            <span className="text-rose-500 text-[10px] font-mono">−</span>
+          )}
+          {isWinner && (
+            <>
+              {step.label.startsWith("▲") ? (
+                <TrendingUp className="h-3.5 w-3.5 text-brand-700 shrink-0" />
+              ) : (
+                <TrendingDown className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+              )}
+            </>
+          )}
+          {label}
+        </div>
+        {step.note && (
+          <div className="text-[11px] text-ink-400 mt-0.5 leading-snug max-w-lg">
+            {step.note}
+          </div>
+        )}
+      </div>
+      <div
+        className={`text-[14px] font-mono tabular shrink-0 ${
+          isTotal
+            ? "font-bold text-ink-900 text-[18px]"
+            : step.isSubtotal
+            ? "font-semibold text-ink-900"
+            : step.isDeduction
+            ? "text-rose-600"
+            : step.value === 0
+            ? "text-ink-300"
+            : "text-ink-800"
+        }`}
+      >
+        {step.isDeduction
+          ? `(${formatMoney(Math.abs(step.value))})`
+          : formatMoney(step.value)}
+      </div>
+    </div>
+  );
+}
+
+function BonusesNotTriggeredCard({ bonuses }: { bonuses: CalcBonusEval[] }) {
+  const realBonuses = bonuses.filter((b) => b.amount > 0);
+  if (realBonuses.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Bonuses evaluated — not triggered</CardTitle>
+        <CardDescription>
+          Structured bonuses on this deal that didn&apos;t hit. Shown for
+          transparency — useful when the agent asks about thresholds.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="divide-y divide-ink-100/80">
+        {realBonuses.map((b, i) => (
+          <div key={i} className="py-3 flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[13px] text-ink-600">{b.label}</div>
+              <div className="text-[11.5px] text-ink-400 mt-0.5">
+                {b.reason}
+              </div>
+            </div>
+            <div className="text-[12.5px] text-ink-300 font-mono tabular line-through shrink-0">
+              {formatMoney(b.amount)}
+            </div>
+          </div>
+        ))}
       </CardContent>
     </Card>
   );
 }
 
 function UnsupportedDeal({
-  dealType,
+  calc,
   deal,
   existingSettlement,
   grossSoFar,
@@ -365,7 +616,7 @@ function UnsupportedDeal({
   ticketCount,
   expenseRowCount,
 }: {
-  dealType: string;
+  calc: Extract<ReturnType<typeof calculateSettlement>, { supported: false }>;
   deal: NonNullable<Awaited<ReturnType<typeof getShowById>>>["deal"];
   existingSettlement: NonNullable<
     Awaited<ReturnType<typeof getShowById>>
@@ -376,27 +627,21 @@ function UnsupportedDeal({
   ticketCount: number;
   expenseRowCount: number;
 }) {
-  const friendly: Record<string, string> = {
-    flat: "flat guarantee",
-    percentage_of_gross: "percentage of gross",
-    percentage_of_net: "percentage of net",
-    vs: "vs deal",
-    door: "door deal",
-  };
-
   return (
     <>
       <Card accent="amber">
         <CardContent className="py-12 text-center">
           <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 ring-1 ring-amber-200/80 mb-5">
-            <FileWarning className="h-5 w-5 text-amber-700" />
+            <Info className="h-5 w-5 text-amber-700" />
           </div>
-          <h2 className="font-display text-[22px] font-medium text-ink-900 mb-2" style={{ letterSpacing: "-0.02em" }}>
-            The in-app tool can&apos;t settle a {friendly[dealType] ?? dealType} yet.
+          <h2
+            className="font-display text-[22px] font-medium text-ink-900 mb-2"
+            style={{ letterSpacing: "-0.02em" }}
+          >
+            Cannot settle this deal automatically
           </h2>
           <p className="text-[13px] text-ink-500 max-w-md mx-auto leading-relaxed">
-            Mariana would do this on a Google Sheet at 2am tonight. The inputs
-            are below — but the math doesn&apos;t happen here.
+            {calc.reason}
           </p>
         </CardContent>
       </Card>
@@ -406,8 +651,7 @@ function UnsupportedDeal({
           <div>
             <CardTitle>What the system has</CardTitle>
             <CardDescription>
-              The inputs Mariana would pull together to settle this show.
-              They&apos;re here — but disconnected from the deal terms.
+              Inputs available if you need to calculate manually.
             </CardDescription>
           </div>
         </CardHeader>
@@ -425,7 +669,6 @@ function UnsupportedDeal({
               value={formatMoney(grossSoFar - totalFees)}
             />
           </div>
-
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-5">
             <Field label="Tickets sold" mono value={String(ticketCount)} />
             <Field
@@ -439,7 +682,6 @@ function UnsupportedDeal({
               value={formatMoney(totalExpenses)}
             />
           </div>
-
           {deal?.dealNotesFreetext && (
             <div className="mt-6">
               <div className="eyebrow text-[10px] text-ink-500 mb-2">
@@ -461,8 +703,8 @@ function UnsupportedDeal({
             <div>
               <CardTitle>Actually settled (off-platform)</CardTitle>
               <CardDescription>
-                Mariana ran this in a spreadsheet. Here&apos;s the result that
-                was logged back into Greenroom afterward.
+                The result logged back into Greenroom after a manual
+                calculation.
               </CardDescription>
             </div>
             {existingSettlement.status === "disputed" ? (
@@ -474,129 +716,13 @@ function UnsupportedDeal({
           <CardContent>
             <div className="flex items-baseline justify-between py-2">
               <span className="text-[13px] text-ink-600">Total to artist</span>
-              <span className="text-[32px] font-mono tabular font-semibold text-ink-900" style={{ letterSpacing: "-0.02em" }}>
+              <span
+                className="text-[32px] font-mono tabular font-semibold text-ink-900"
+                style={{ letterSpacing: "-0.02em" }}
+              >
                 {formatMoney(existingSettlement.totalToArtist)}
               </span>
             </div>
-          </CardContent>
-        </Card>
-      )}
-    </>
-  );
-}
-
-function SupportedSettlement({
-  calc,
-  existingSettlement,
-}: {
-  calc: Extract<
-    ReturnType<typeof calculateSettlement>,
-    { supported: true }
-  >;
-  existingSettlement: NonNullable<
-    Awaited<ReturnType<typeof getShowById>>
-  >["settlement"];
-}) {
-  return (
-    <>
-      {/* Hero number */}
-      <div className="text-center py-10 mb-2">
-        <div className="eyebrow text-[10px] text-ink-400 mb-3">Total to artist</div>
-        <div
-          className="text-[72px] font-mono tabular font-bold text-ink-900 leading-none"
-          style={{ letterSpacing: "-0.03em" }}
-        >
-          {formatMoney(calc.totalToArtist)}
-        </div>
-        {existingSettlement && (
-          <div className="mt-3">
-            {existingSettlement.status === "paid" ? (
-              <PlainBadge variant="brand">Paid</PlainBadge>
-            ) : existingSettlement.status === "signed" ||
-              existingSettlement.status === "finalized" ? (
-              <PlainBadge variant="brand">Signed</PlainBadge>
-            ) : existingSettlement.status === "disputed" ? (
-              <PlainBadge variant="rose">Disputed</PlainBadge>
-            ) : null}
-          </div>
-        )}
-        {existingSettlement?.totalToArtist != null &&
-          existingSettlement.totalToArtist !== calc.totalToArtist && (
-          <div className="text-[12px] text-ink-400 mt-2">
-            Originally settled at{" "}
-            <span className="font-mono tabular text-ink-600">
-              {formatMoney(existingSettlement.totalToArtist)}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Worksheet breakdown */}
-      <Card accent="brand">
-        <CardHeader>
-          <div>
-            <CardTitle>Settlement worksheet</CardTitle>
-            <CardDescription className="font-mono">
-              {calc.finalFormula}
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="divide-y divide-ink-100/80">
-          <Row
-            label="Gross box office"
-            value={formatMoney(calc.grossBoxOffice)}
-          />
-          <Row label="Net box office" value={formatMoney(calc.netBoxOffice)} />
-          <Row
-            label="Total expenses (passed through)"
-            value={formatMoney(calc.totalExpenses)}
-          />
-          <div className="pt-3" />
-          {calc.steps.map((step, i) => (
-            <Row
-              key={i}
-              label={step.label}
-              value={formatMoney(step.value)}
-              note={step.note}
-            />
-          ))}
-          <div className="pt-3" />
-          <div className="flex items-baseline justify-between py-3 font-semibold">
-            <span className="text-[13px] text-ink-900">Total to artist</span>
-            <span className="text-[18px] font-mono tabular text-ink-900">
-              {formatMoney(calc.totalToArtist)}
-            </span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {calc.bonusesNotTriggered.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Bonuses not triggered</CardTitle>
-            <CardDescription>
-              Structured bonuses on this deal that didn&apos;t hit. Shown for
-              transparency — useful when the agent asks &quot;what about that
-              gross threshold bonus?&quot;
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="divide-y divide-ink-100/80">
-            {calc.bonusesNotTriggered.map((b, i) => (
-              <div
-                key={i}
-                className="py-3 flex items-baseline justify-between gap-4"
-              >
-                <div className="min-w-0">
-                  <div className="text-[13px] text-ink-600">{b.label}</div>
-                  <div className="text-[11.5px] text-ink-400 mt-0.5">
-                    {b.reason}
-                  </div>
-                </div>
-                <div className="text-[12.5px] text-ink-300 font-mono tabular line-through">
-                  {formatMoney(b.amount)}
-                </div>
-              </div>
-            ))}
           </CardContent>
         </Card>
       )}
@@ -690,28 +816,126 @@ function SignoffSection({ settlement }: { settlement: Settlement }) {
   );
 }
 
-function Row({
-  label,
-  value,
-  note,
-}: {
+type Stage = {
+  key: string;
   label: string;
-  value: string;
-  note?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  timestamp?: Date | null;
+};
+
+function LifecycleBar({
+  settlement,
+  disputedRecoups,
+}: {
+  settlement: Settlement;
+  disputedRecoups: number;
 }) {
-  return (
-    <div className="flex items-baseline justify-between py-2.5">
-      <div>
-        <div className="text-[13px] text-ink-600">{label}</div>
-        {note && (
-          <div className="text-[11.5px] text-ink-400 mt-0.5 max-w-md leading-snug">
-            {note}
+  if (settlement.status === "voided") {
+    return (
+      <div className="rounded-lg border border-ink-200/80 bg-white px-5 py-4 flex items-center gap-3">
+        <XCircle className="h-4 w-4 text-ink-400" />
+        <div>
+          <div className="text-[13px] font-medium text-ink-900">
+            Settlement voided
           </div>
-        )}
+          <div className="text-[11.5px] text-ink-400 mt-0.5">
+            The show was cancelled or the settlement was scrapped.
+          </div>
+        </div>
       </div>
-      <div className="text-[13.5px] text-ink-900 font-mono tabular">
-        {value}
-      </div>
-    </div>
+    );
+  }
+
+  const stages: Stage[] = [
+    { key: "draft", label: "Drafted", icon: Pencil, timestamp: settlement.draftedAt },
+    { key: "submitted", label: "Submitted", icon: Mail, timestamp: settlement.submittedAt },
+    { key: "review", label: "Reviewed", icon: ChevronRight, timestamp: settlement.reviewStartedAt },
+    {
+      key: "signed",
+      label: settlement.disputedAt ? "Finalized" : "Signed",
+      icon: Check,
+      timestamp: settlement.finalizedAt ?? settlement.signedAt,
+    },
+    { key: "paid", label: "Paid", icon: Wallet, timestamp: settlement.paidAt },
+  ];
+
+  const currentIndex = (() => {
+    switch (settlement.status) {
+      case "draft": return 0;
+      case "submitted": return 1;
+      case "in_review": return 2;
+      case "disputed":
+      case "signed":
+      case "revised":
+      case "finalized": return 3;
+      case "paid": return 4;
+      default: return 0;
+    }
+  })();
+
+  const isDisputed =
+    settlement.status === "disputed" ||
+    settlement.status === "revised" ||
+    !!settlement.disputedAt;
+
+  return (
+    <Card>
+      <CardContent className="py-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="eyebrow text-[10px] text-ink-400">
+            Settlement lifecycle
+          </div>
+          {isDisputed && (
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-rose-700">
+              <AlertTriangle className="h-3 w-3" />
+              {settlement.status === "disputed"
+                ? "In dispute"
+                : settlement.status === "revised"
+                ? "Revision sent"
+                : "Resolved after dispute"}
+              {disputedRecoups > 0 && (
+                <span className="text-rose-600">
+                  · {disputedRecoups} disputed recoup
+                  {disputedRecoups === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-5 gap-1 relative">
+          <div className="absolute top-3.5 left-[10%] right-[10%] h-px bg-ink-200/60" />
+          {stages.map((stage, i) => {
+            const isComplete = i < currentIndex;
+            const isCurrent = i === currentIndex;
+            const isFuture = i > currentIndex;
+            const Icon = stage.icon;
+            const stageDot = isComplete
+              ? "bg-brand-700 ring-brand-700 text-white"
+              : isCurrent
+              ? isDisputed
+                ? "bg-rose-50 ring-rose-500 text-rose-700"
+                : "bg-brand-50 ring-brand-700 text-brand-700"
+              : "bg-white ring-ink-200/80 text-ink-300";
+
+            return (
+              <div key={stage.key} className="flex flex-col items-center text-center">
+                <div className={`relative z-10 w-7 h-7 rounded-full ring-2 flex items-center justify-center ${stageDot}`}>
+                  <Icon className="h-3.5 w-3.5" />
+                </div>
+                <div className={`mt-2.5 text-[11px] font-medium leading-tight ${isFuture ? "text-ink-300" : "text-ink-900"}`}>
+                  {stage.label}
+                </div>
+                <div className="text-[10px] text-ink-400 mt-0.5 font-mono tabular leading-tight min-h-[12px]">
+                  {stage.timestamp
+                    ? new Date(stage.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                    : ""}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
